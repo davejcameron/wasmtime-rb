@@ -72,18 +72,52 @@ module Wasmtime
       end
     end
 
-    describe ".deserialize" do
-      it "raises on invalid module" do
+    describe ".deserialize and .deserialize_unchecked" do
+      let(:serialized) { Module.new(engine, wat).serialize }
+
+      it "deserializes a module" do
+        mod = Module.deserialize(engine, serialized)
+        expect(mod).to be_a(Wasmtime::Module)
+        expect(mod.serialize).to eq(serialized)
+      end
+
+      it "deserializes a module unchecked" do
+        mod = Module.deserialize_unchecked(engine, serialized)
+        expect(mod).to be_a(Wasmtime::Module)
+        expect(mod.serialize).to eq(serialized)
+      end
+
+      it "raises on invalid module for deserialize" do
         expect { Module.deserialize(engine, "foo") }
           .to raise_error(Wasmtime::Error)
       end
 
-      it "tracks memory usage" do
-        serialized = Module.new(engine, wat).serialize
-        mod, increase_bytes = measure_gc_stat(:malloc_increase_bytes) { Module.deserialize(engine, serialized) }
+      it "raises on invalid module for deserialize_unchecked" do
+        expect { Module.deserialize_unchecked(engine, "foo") }
+          .to raise_error(Wasmtime::Error)
+      end
 
+      it "tracks memory usage for deserialize" do
+        mod, increase_bytes = measure_gc_stat(:malloc_increase_bytes) { Module.deserialize(engine, serialized) }
         expect(increase_bytes).to be > serialized.bytesize
         expect(mod).to be_a(Wasmtime::Module)
+      end
+
+      it "tracks memory usage for deserialize_unchecked" do
+        mod, increase_bytes = measure_gc_stat(:malloc_increase_bytes) { Module.deserialize_unchecked(engine, serialized) }
+        expect(increase_bytes).to be > 0  # It should use some memory
+        expect(mod).to be_a(Wasmtime::Module)
+      end
+
+      it "compares memory usage between deserialize and deserialize_unchecked" do
+        _, regular_increase = measure_gc_stat(:malloc_increase_bytes) { Module.deserialize(engine, serialized) }
+        _, unchecked_increase = measure_gc_stat(:malloc_increase_bytes) { Module.deserialize_unchecked(engine, serialized) }
+
+        puts "Regular deserialize memory increase: #{regular_increase}"
+        puts "Unchecked deserialize memory increase: #{unchecked_increase}"
+
+        expect(unchecked_increase).to be < regular_increase
+        expect(unchecked_increase).to be > 0
       end
     end
 

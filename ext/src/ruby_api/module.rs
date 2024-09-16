@@ -2,6 +2,7 @@ use std::{
     mem::{transmute, MaybeUninit},
     ops::Deref,
     os::raw::c_void,
+    slice,
 };
 
 use super::{engine::Engine, root};
@@ -62,6 +63,27 @@ impl Module {
     }
 
     /// @yard
+    /// Instantiates a serialized module without copying the data.
+    /// This method is more memory-efficient than {.deserialize}, but the caller must ensure 
+    /// that the `compiled` string is not modified or freed while the resulting Module is in use.
+    ///
+    /// @def deserialize_unchecked(engine, compiled)
+    /// @param engine [Wasmtime::Engine]
+    /// @param compiled [String] String obtained with either {Wasmtime::Engine#precompile_module} or {#serialize}.
+    /// @return [Wasmtime::Module]
+    pub fn deserialize_unchecked(engine: &Engine, compiled: RString) -> Result<Self, Error> {
+        unsafe {
+            let ptr = RSTRING_PTR(compiled.as_raw());
+            let len = RSTRING_LEN(compiled.as_raw()) as usize;
+            let slice = slice::from_raw_parts(ptr as *const u8, len);
+            
+            ModuleImpl::deserialize(engine.get(), slice)
+                .map(Into::into)
+                .map_err(|e| error!("Could not deserialize module: {}", e))
+        }
+    }
+
+    /// @yard
     /// Instantiates a serialized module coming from either {#serialize} or {Wasmtime::Engine#precompile_module}.
     ///
     /// The engine serializing and the engine deserializing must:
@@ -73,10 +95,12 @@ impl Module {
     /// @param compiled [String] String obtained with either {Wasmtime::Engine#precompile_module} or {#serialize}.
     /// @return [Wasmtime::Module]
     pub fn deserialize(engine: &Engine, compiled: RString) -> Result<Self, Error> {
-        // SAFETY: this string is immediately copied and never moved off the stack
-        unsafe { ModuleImpl::deserialize(engine.get(), compiled.as_slice()) }
-            .map(Into::into)
-            .map_err(|e| error!("Could not deserialize module: {}", e))
+        unsafe {
+            let slice = compiled.as_slice();
+            ModuleImpl::deserialize(engine.get(), slice)
+                .map(Into::into)
+                .map_err(|e| error!("Could not deserialize module: {}", e))
+        }
     }
 
     /// @yard
@@ -155,6 +179,7 @@ pub fn init() -> Result<(), Error> {
 
     class.define_singleton_method("new", function!(Module::new, 2))?;
     class.define_singleton_method("from_file", function!(Module::from_file, 2))?;
+    class.define_singleton_method("deserialize_unchecked", function!(Module::deserialize_unchecked, 2))?;
     class.define_singleton_method("deserialize", function!(Module::deserialize, 2))?;
     class.define_singleton_method("deserialize_file", function!(Module::deserialize_file, 2))?;
     class.define_method("serialize", method!(Module::serialize, 0))?;
